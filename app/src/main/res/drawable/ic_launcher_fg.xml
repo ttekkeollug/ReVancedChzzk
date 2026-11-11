@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- 번개 + 재생 모양의 오리지널 아이콘 -->
+    <path android:fillColor="#FF00F0A0"
+        android:pathData="M58,30 L38,58 L52,58 L46,78 L70,46 L56,46 Z" />
+</vector>

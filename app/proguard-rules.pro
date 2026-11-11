@@ -1,0 +1,7 @@
+-keepattributes *Annotation*, InnerClasses
+-keepclassmembers class com.seolha.rechzzk.net.** { *** Companion; }
+-keepclasseswithmembers class com.seolha.rechzzk.net.** { kotlinx.serialization.KSerializer serializer(...); }
+-dontwarn okhttp3.internal.platform.**
+-dontwarn org.conscrypt.**
+-dontwarn org.bouncycastle.**
+-dontwarn org.openjsse.**
