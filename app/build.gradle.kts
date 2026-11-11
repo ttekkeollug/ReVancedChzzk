@@ -17,13 +17,23 @@ android {
         versionName = "1.0.0"
     }
 
+    // 환경변수(RELEASE_STORE_FILE 등)로 서명 키가 주어지면 사용, 없으면 디버그 키로 서명
+    val releaseStore = System.getenv("RELEASE_STORE_FILE")
+    signingConfigs {
+        if (releaseStore != null) create("release") {
+            storeFile = file(releaseStore)
+            storePassword = System.getenv("RELEASE_STORE_PASSWORD")
+            keyAlias = System.getenv("RELEASE_KEY_ALIAS")
+            keyPassword = System.getenv("RELEASE_KEY_PASSWORD")
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // 개인용 빌드: 디버그 키로 서명해서 바로 설치 가능하게 함
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }
     compileOptions {
