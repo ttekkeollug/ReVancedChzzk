@@ -51,7 +51,7 @@ import com.seolha.rechzzk.Auth
 import com.seolha.rechzzk.LatencyMode
 import com.seolha.rechzzk.Prefs
 import com.seolha.rechzzk.net.Api
-import com.seolha.rechzzk.notify.AlertService
+import com.seolha.rechzzk.notify.FastAlerts
 import com.seolha.rechzzk.notify.LiveAlerts
 import com.seolha.rechzzk.net.SearchChannel
 import com.seolha.rechzzk.player.Session
@@ -156,13 +156,17 @@ private fun AccountScreen(onLogin: () -> Unit) {
         item { SettingHeader("알림 · 통나무") }
         item { ToggleRow("방송 시작 알림", liveAlerts) { Prefs.setLiveAlerts(it); LiveAlerts.setup(ctx) } }
         if (liveAlerts) {
-            item { ToggleRow("빠른 알림 (1분 간격)", fastAlerts) { Prefs.setFastAlerts(it); AlertService.sync(ctx) } }
+            item { ToggleRow("빠른 알림 (약 1분 간격)", fastAlerts) { Prefs.setFastAlerts(it); FastAlerts.sync(ctx) } }
             item {
-                Text(if (fastAlerts) "앱을 꺼도 1분마다 확인합니다. 상단에 작은 '방송 알림 확인 중' 표시가 생기며, 알림 설정에서 그 표시만 숨길 수 있습니다."
-                     else "약 15분마다 확인합니다(안드로이드 제한). 삼성 기기는 배터리 절약 때문에 더 늦을 수 있습니다.",
+                Text(if (fastAlerts) "상시 알림 없이 1분마다 잠깐 깨어나 확인합니다. 휴대폰을 오래 놔둬 깊은 절전 상태가 되면 10분 정도까지 늦어질 수 있습니다."
+                     else "약 15분마다 확인합니다(안드로이드 제한).",
                     color = C.Dim, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp))
             }
             item { ToggleRow("알림(종) 끈 채널도 알림", alertAll, Prefs::setAlertAll) }
+            item {
+                Text(if (alertAll) "팔로우한 모든 채널의 방송 시작을 알립니다." else "채널 프로필에서 종(🔔)을 켠 채널이 방송을 켰을 때만 알립니다.",
+                    color = C.Dim, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp))
+            }
             item {
                 val pm = ctx.getSystemService(android.os.PowerManager::class.java)
                 val ignoring = pm.isIgnoringBatteryOptimizations(ctx.packageName)

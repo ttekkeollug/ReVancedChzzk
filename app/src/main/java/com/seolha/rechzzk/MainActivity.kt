@@ -101,7 +101,7 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             Auth.user.map { it?.userIdHash }.distinctUntilChanged().drop(1).collect {
                 Session.reconnectChat()
-                com.seolha.rechzzk.notify.AlertService.sync(this@MainActivity)
+                com.seolha.rechzzk.notify.FastAlerts.sync(this@MainActivity)
             }
         }
         handleIntent(intent)
@@ -121,8 +121,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        // 화면이 보이는 상태에서만 포그라운드 서비스를 시작할 수 있으므로 여기서 동기화
-        com.seolha.rechzzk.notify.AlertService.sync(this)
+        // 앱을 열 때마다 빠른 알림 알람 예약 상태를 설정과 맞춤
+        com.seolha.rechzzk.notify.FastAlerts.sync(this)
         // MediaController로 서비스에 연결해 두면 백그라운드 재생 시 알림·포그라운드 서비스가 유지됨
         val token = SessionToken(this, ComponentName(this, PlaybackService::class.java))
         controllerFuture = MediaController.Builder(this, token).buildAsync()

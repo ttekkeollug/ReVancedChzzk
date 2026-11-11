@@ -50,8 +50,9 @@ object LiveAlerts {
     private const val KEY_LAST = "lastCheck"
 
     fun setup(ctx: Context) {
-        AlertService.sync(ctx)
+        FastAlerts.sync(ctx)
         val nm = ctx.getSystemService(NotificationManager::class.java)
+        nm.deleteNotificationChannel("alert_status")   // 이전 버전의 '방송 알림 확인 중' 상시 알림 채널 정리
         nm.createNotificationChannel(
             NotificationChannel(CHANNEL_ID, "방송 시작 알림", NotificationManager.IMPORTANCE_HIGH)
                 .apply { description = "팔로우한 채널이 방송을 시작하면 알려줍니다" }
@@ -88,12 +89,21 @@ object LiveAlerts {
         val current = lives.associateBy { it.channelId }
         val firstRun = !sp.getBoolean(KEY_INIT, false)
         if (!firstRun) {
-            current.filterKeys { it !in seen }.values
-                .filter { Prefs.alertAll.value || it.channel?.personalData?.following?.notification != false }
-                .forEach { notify(ctx, it) }
+            for (f in current.filterKeys { it !in seen }.values) {
+                if (Prefs.alertAll.value || bellOn(f)) notify(ctx, f)
+            }
         }
         sp.edit().putStringSet(KEY_SEEN, current.keys).putBoolean(KEY_INIT, true)
             .putLong(KEY_LAST, System.currentTimeMillis()).apply()
+    }
+
+    /**
+     * 채널 알림(종)이 켜져 있는지. 목록 응답에 값이 있으면 그대로 쓰고,
+     * 없으면 해당 채널의 팔로우 상태를 직접 조회해서 확인(새로 방송을 켠 채널만 조회하므로 요청이 적음).
+     */
+    private suspend fun bellOn(f: FollowingItem): Boolean {
+        f.channel?.personalData?.following?.notification?.let { return it }
+        return runCatching { Api.followState(f.channelId)?.notification }.getOrNull() == true
     }
 
     /** 마지막으로 확인한 시각(설정 화면 표시용) */
