@@ -13,8 +13,8 @@ android {
         applicationId = "com.seolha.rechzzk"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.0.1"
+        versionCode = 3
+        versionName = "1.0.2"
     }
 
     // 환경변수(RELEASE_STORE_FILE 등)로 서명 키가 주어지면 사용, 없으면 디버그 키로 서명

@@ -55,6 +55,10 @@ object Prefs {
     /** 빠른 알림(1분 간격, 상시 알림 표시) */
     val fastAlerts: StateFlow<Boolean> = _fastAlerts.asStateFlow()
 
+    private val _landscapeChat = MutableStateFlow(true)
+    /** 가로 전체화면에서 채팅 패널 열림 여부 (마지막 상태 기억) */
+    val landscapeChat: StateFlow<Boolean> = _landscapeChat.asStateFlow()
+
     lateinit var raw: SharedPreferences
         private set
 
@@ -68,8 +72,11 @@ object Prefs {
         _liveAlerts.value = sp.getBoolean("liveAlerts", true)
         _alertAll.value = sp.getBoolean("alertAll", false)
         _fastAlerts.value = sp.getBoolean("fastAlerts", true)
+        _landscapeChat.value = sp.getBoolean("landscapeChat", true)
         raw = sp
     }
+
+    fun setLandscapeChat(v: Boolean) { _landscapeChat.value = v; sp.edit().putBoolean("landscapeChat", v).apply() }
 
     fun setFastAlerts(v: Boolean) { _fastAlerts.value = v; sp.edit().putBoolean("fastAlerts", v).apply() }
 

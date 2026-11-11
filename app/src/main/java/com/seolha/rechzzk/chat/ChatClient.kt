@@ -38,6 +38,8 @@ data class ChatMessage(
     val donation: Int = 0,
     val blinded: Boolean = false,
     val isStreamer: Boolean = false,
+    /** 닉네임 앞 배지 이미지(역할 → 구독 → 시청자 배지 순) */
+    val badges: List<String> = emptyList(),
 )
 
 /**
@@ -51,6 +53,10 @@ class ChatClient(private val scope: CoroutineScope) {
 
     private val _canSend = MutableStateFlow(false)
     val canSend: StateFlow<Boolean> = _canSend.asStateFlow()
+
+    private val _pinned = MutableStateFlow<ChatMessage?>(null)
+    /** 고정 메시지(공지). 처음 접속할 때와 cmd 94010으로 갱신 */
+    val pinned: StateFlow<ChatMessage?> = _pinned.asStateFlow()
 
     private val _connected = MutableStateFlow(false)
     val connected: StateFlow<Boolean> = _connected.asStateFlow()
@@ -71,6 +77,7 @@ class ChatClient(private val scope: CoroutineScope) {
         this.chatChannelId = chatChannelId
         this.streamingChannelId = streamingChannelId
         _messages.value = emptyList()
+        _pinned.value = null
         connectJob = scope.launch { openSocket() }
     }
 
@@ -139,8 +146,14 @@ class ChatClient(private val scope: CoroutineScope) {
                 socket.send(recent.toString())
             }
             15101 -> {
-                val list = (obj["bdy"] as? JsonObject)?.get("messageList") as? JsonArray ?: return
+                val bdy = obj["bdy"] as? JsonObject ?: return
+                _pinned.value = (bdy["notice"] as? JsonObject)?.let { parse(it, forNotice = true) }
+                val list = bdy["messageList"] as? JsonArray ?: return
                 append(list.mapNotNull { parse(it) })
+            }
+            94010 -> {
+                // 고정 메시지 변경. 내용이 없으면 고정 해제
+                _pinned.value = (obj["bdy"] as? JsonObject)?.let { parse(it, forNotice = true) }
             }
             93101, 93102 -> {
                 val list = obj["bdy"] as? JsonArray ?: return
@@ -152,7 +165,7 @@ class ChatClient(private val scope: CoroutineScope) {
     private fun str(o: JsonObject, vararg keys: String): String? =
         keys.firstNotNullOfOrNull { (o[it] as? JsonPrimitive)?.contentOrNull }
 
-    private fun parse(el: JsonElement): ChatMessage? {
+    private fun parse(el: JsonElement, forNotice: Boolean = false): ChatMessage? {
         val o = el as? JsonObject ?: return null
         val text = str(o, "msg", "content") ?: return null
         val profile = str(o, "profile")?.let { runCatching { Http.json.parseToJsonElement(it).jsonObject }.getOrNull() }
@@ -165,7 +178,8 @@ class ChatClient(private val scope: CoroutineScope) {
         val emojis = (extras?.get("emojis") as? JsonObject)
             ?.mapNotNull { (k, v) -> (v as? JsonPrimitive)?.contentOrNull?.let { k to it } }?.toMap() ?: emptyMap()
         val pay = extras?.get("payAmount")?.jsonPrimitive?.longOrNull?.toInt() ?: 0
-        if (type != 1 && type != 10) return null
+        if (!forNotice && type != 1 && type != 10) return null
+        if (forNotice && text.isBlank()) return null
         return ChatMessage(
             id = idGen.incrementAndGet(),
             userIdHash = uid,
@@ -175,7 +189,21 @@ class ChatClient(private val scope: CoroutineScope) {
             donation = if (type == 10) pay else 0,
             blinded = status == "CBOTBLIND" || status == "HIDDEN",
             isStreamer = role == "streamer",
+            badges = profile?.let { badgesOf(it) } ?: emptyList(),
         )
+    }
+
+    private fun imageOf(el: JsonElement?): String? =
+        ((el as? JsonObject)?.get("imageUrl") as? JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }
+
+    /** 공식 앱처럼 역할 배지(매니저·스트리머) → 구독 배지 → 시청자 배지(후원 등) 순서 */
+    private fun badgesOf(p: JsonObject): List<String> {
+        val out = mutableListOf<String>()
+        imageOf(p["badge"])?.let(out::add)
+        val sub = ((p["streamingProperty"] as? JsonObject)?.get("subscription") as? JsonObject)?.get("badge")
+        imageOf(sub)?.let(out::add)
+        (p["viewerBadges"] as? JsonArray)?.forEach { vb -> imageOf((vb as? JsonObject)?.get("badge"))?.let(out::add) }
+        return out.distinct().take(4)
     }
 
     private fun append(items: List<ChatMessage>) {

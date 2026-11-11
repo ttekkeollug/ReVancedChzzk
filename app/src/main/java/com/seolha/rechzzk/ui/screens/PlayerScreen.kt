@@ -36,6 +36,13 @@ import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.foundation.border
+import androidx.compose.material.icons.filled.MoreHoriz
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.ui.unit.coerceIn
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.material.icons.filled.SpeakerNotesOff
+import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Headphones
@@ -122,6 +129,14 @@ fun Modifier.blockTouches(): Modifier = this.pointerInput(Unit) {
     awaitPointerEventScope { while (true) awaitPointerEvent() }
 }
 
+/** 플레이어 컨트롤 표시 상태. 방송 정보 패널도 같은 상태를 따라 나타났다 사라짐 */
+class ControlsUi {
+    var visible by mutableStateOf(true)
+    /** 값이 바뀔 때마다 자동 숨김 타이머가 다시 시작됨 */
+    var touch by mutableIntStateOf(0)
+    fun poke() { touch++ }
+}
+
 /** 플레이어 상태를 Compose 상태로 노출 */
 class PlayerUiState {
     var isPlaying by mutableStateOf(false)
@@ -198,6 +213,7 @@ fun PlayerScreen() {
     val activity = LocalContext.current as? MainActivity
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val st = rememberPlayerUiState()
+    val controls = remember { ControlsUi() }
     var showSheet by remember { mutableStateOf(false) }
 
     BackHandler {
@@ -206,18 +222,32 @@ fun PlayerScreen() {
     val cur = now ?: run { LaunchedEffect(Unit) { Nav.pop() }; return }
 
     if (landscape) {
+        val chatOpen by Prefs.landscapeChat.collectAsState()
+        val showChat = chatOpen && cur is NowPlaying.Live && cur.error == null
         Box(Modifier.fillMaxSize().background(Color.Black).blockTouches()) {
-            PlayerSurface(Modifier.fillMaxSize())
-            PlayerControls(cur, st, fullscreen = true, onMore = { showSheet = true })
+            // 채팅을 열면 영상은 남은 공간에 맞춰 줄어들고, 채팅은 오른쪽에 붙음
+            Row(Modifier.fillMaxSize()) {
+                Box(Modifier.weight(1f).fillMaxHeight()) {
+                    PlayerSurface(Modifier.fillMaxSize())
+                    PlayerControls(cur, st, controls, fullscreen = true, onMore = { showSheet = true },
+                        chatOpen = if (cur is NowPlaying.Live) chatOpen else null,
+                        onToggleChat = { Prefs.setLandscapeChat(!chatOpen) })
+                }
+                AnimatedVisibility(showChat,
+                    enter = androidx.compose.animation.expandHorizontally(expandFrom = Alignment.Start) + fadeIn(),
+                    exit = androidx.compose.animation.shrinkHorizontally(shrinkTowards = Alignment.Start) + fadeOut()) {
+                    LandscapeChatPanel(cur as NowPlaying.Live) { Prefs.setLandscapeChat(false) }
+                }
+            }
         }
     } else {
         Column(Modifier.fillMaxSize().blockTouches().background(C.Bg).statusBarsPadding().navigationBarsPadding().imePadding()) {
             Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f)) {
                 PlayerSurface(Modifier.fillMaxSize())
-                PlayerControls(cur, st, fullscreen = false, onMore = { showSheet = true })
+                PlayerControls(cur, st, controls, fullscreen = false, onMore = { showSheet = true })
             }
             when (cur) {
-                is NowPlaying.Live -> LiveInfoAndChat(cur)
+                is NowPlaying.Live -> LiveInfoAndChat(cur, controls)
                 is NowPlaying.Vod -> VodInfo(cur)
             }
         }
@@ -230,12 +260,13 @@ fun PlayerScreen() {
 }
 
 @Composable
-private fun PlayerControls(cur: NowPlaying, st: PlayerUiState, fullscreen: Boolean, onMore: () -> Unit) {
+private fun PlayerControls(cur: NowPlaying, st: PlayerUiState, ui: ControlsUi, fullscreen: Boolean, onMore: () -> Unit,
+                           chatOpen: Boolean? = null, onToggleChat: () -> Unit = {}) {
     val activity = LocalContext.current as? MainActivity
     val radio by PlayerHolder.radio.collectAsState()
     val latency by Prefs.latency.collectAsState()
-    var visible by remember { mutableStateOf(true) }
-    var touch by remember { mutableIntStateOf(0) }
+    var visible by ui::visible
+    var touch by ui::touch
     LaunchedEffect(visible, touch, st.isPlaying) {
         if (visible && st.isPlaying) { delay(3500); visible = false }
     }
@@ -275,6 +306,12 @@ private fun PlayerControls(cur: NowPlaying, st: PlayerUiState, fullscreen: Boole
                     Spacer(Modifier.weight(1f))
                     IconBtn(Icons.Filled.Headphones, "라디오 모드", tint = if (radio) C.Accent else Color.White) {
                         PlayerHolder.setRadio(!radio)
+                    }
+                    if (fullscreen && chatOpen != null) {
+                        IconBtn(if (chatOpen) Icons.Filled.SpeakerNotesOff else Icons.AutoMirrored.Filled.Chat,
+                            if (chatOpen) "채팅 닫기" else "채팅 열기", tint = if (chatOpen) C.Accent else Color.White) {
+                            onToggleChat(); touch++
+                        }
                     }
                     IconBtn(Icons.Filled.PictureInPictureAlt, "PIP") { activity?.enterPip() }
                     IconBtn(Icons.Filled.MoreVert, "설정", onClick = onMore)
@@ -340,11 +377,9 @@ private fun IconBtn(icon: ImageVector, desc: String, tint: Color = Color.White, 
 }
 
 @Composable
-private fun LiveInfoAndChat(cur: NowPlaying.Live) {
+private fun LiveInfoAndChat(cur: NowPlaying.Live, controls: ControlsUi) {
     val d = cur.detail
-    val messages by Session.chat.messages.collectAsState()
     val canSend by Session.chat.canSend.collectAsState()
-    val cleanBot by Prefs.cleanBot.collectAsState()
     val user by Auth.user.collectAsState()
     var tick by remember { mutableIntStateOf(0) }
     LaunchedEffect(Unit) { while (true) { delay(1000); tick++ } }
@@ -357,30 +392,85 @@ private fun LiveInfoAndChat(cur: NowPlaying.Live) {
     if (showPrediction) PredictionSheet { showPrediction = false }
     if (showCheese) CheeseSheet { showCheese = false }
 
-    // 평소에는 한 줄 요약만 보이고, 누르면 방송 정보 패널이 채팅 위로 펼쳐짐
-    var infoOpen by remember { mutableStateOf(false) }
     val prediction by Session.prediction.collectAsState()
-    Row(Modifier.fillMaxWidth().clickable { infoOpen = !infoOpen }.padding(horizontal = 14.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically) {
-        Avatar(d?.channel?.channelImageUrl, 26.dp)
-        Spacer(Modifier.width(8.dp))
-        Text(d?.liveTitle ?: "", color = C.Text, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1,
-            overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-        if (prediction?.status == "ACTIVE") {
-            Text("🗳 투표", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold,
-                modifier = Modifier.padding(start = 6.dp).clip(RoundedCornerShape(10.dp)).background(C.Accent)
-                    .clickable { showPrediction = true }.padding(horizontal = 8.dp, vertical = 3.dp))
-        }
-        if (d != null) Text("  ${fmtCount(d.concurrentUserCount)}명", color = C.Sub, fontSize = 12.sp)
-        Icon(if (infoOpen) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown, "방송 정보",
-            tint = C.Sub, modifier = Modifier.size(22.dp))
-    }
-    HorizontalDivider(color = C.Surface2)
+    val pinned by Session.chat.pinned.collectAsState()
 
+    Column {
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            Column(Modifier.fillMaxSize()) {
+                pinned?.let { PinnedBar(it) }
+                ChatMessages(Modifier.weight(1f).fillMaxWidth())
+            }
+            // 진행 중인 투표는 항상 오른쪽 위에 작게 표시
+            if (prediction?.status == "ACTIVE") {
+                Text("🗳 투표", color = Color.Black, fontSize = 12.sp, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.align(Alignment.TopEnd).padding(top = if (pinned != null) 62.dp else 8.dp, end = 10.dp)
+                        .clip(RoundedCornerShape(12.dp)).background(C.Accent)
+                        .clickable { showPrediction = true }.padding(horizontal = 10.dp, vertical = 5.dp))
+            }
+            // 화면(영상)을 건드려 컨트롤이 보이는 동안만 방송 정보가 채팅 위로 나타남
+            androidx.compose.animation.AnimatedVisibility(controls.visible && cur.error == null,
+                enter = fadeIn() + androidx.compose.animation.expandVertically(expandFrom = Alignment.Top),
+                exit = fadeOut() + androidx.compose.animation.shrinkVertically(shrinkTowards = Alignment.Top)) {
+                Column(Modifier.fillMaxWidth().background(C.Surface, RoundedCornerShape(bottomStart = 14.dp, bottomEnd = 14.dp))
+                    .clickable(remember { MutableInteractionSource() }, null) { controls.poke() }  // 만지는 동안은 숨기지 않음
+                    .padding(horizontal = 16.dp, vertical = 12.dp)) {
+                    Text(d?.liveTitle ?: "", color = C.Text, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 3,
+                        overflow = TextOverflow.Ellipsis)
+                    Spacer(Modifier.height(6.dp))
+                    TagRow(d?.tags ?: emptyList(), d?.liveCategoryValue)
+                    Spacer(Modifier.height(6.dp))
+                    if (d != null) {
+                        val up = remember(tick, d.openDate) { uptime(d.openDate) ?: "" }
+                        Text("${fmtCount(d.concurrentUserCount)}명 시청 중 · $up 스트리밍 중", color = C.Sub, fontSize = 13.sp)
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    d?.channel?.let { ch ->
+                        Box(Modifier.clickable { Nav.openChannel(ch.channelId) }) {
+                            ChannelLine(ch.channelName, ch.channelImageUrl, ch.verifiedMark, 32.dp)
+                        }
+                    }
+                    if (user?.loggedIn == true) PowerBar { controls.poke(); showPrediction = true }
+                }
+            }
+        }
+        ChatInput(loggedIn = user?.loggedIn == true, canSend = canSend, chatActive = d?.chatActive != false) { showCheese = true }
+    }
+}
+
+/** 고정 메시지: 한 줄로 보이고, 누르면 전체 내용과 작성자를 펼침. X로 이번 시청 동안 숨김 */
+@Composable
+private fun PinnedBar(m: ChatMessage) {
+    var expanded by remember(m.text) { mutableStateOf(false) }
+    var hidden by remember(m.text) { mutableStateOf(false) }
+    if (hidden) return
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)
+        .border(1.dp, C.Surface2, RoundedCornerShape(12.dp)).clip(RoundedCornerShape(12.dp)).background(C.Bg)
+        .clickable { expanded = !expanded }.padding(horizontal = 12.dp, vertical = 10.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Filled.PushPin, "고정 메시지", tint = C.Accent, modifier = Modifier.size(18.dp))
+            Box(Modifier.padding(horizontal = 10.dp).width(1.dp).height(16.dp).background(C.Surface2))
+            Text(m.text.replace(Regex("\\{:[^:{}]+:\\}"), "").trim(), color = C.Text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
+                maxLines = if (expanded) 8 else 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            if (expanded) IconButton({ hidden = true }, Modifier.size(28.dp)) {
+                Icon(Icons.Filled.Close, "고정 메시지 숨기기", tint = C.Sub, modifier = Modifier.size(18.dp))
+            } else Icon(Icons.Filled.MoreHoriz, null, tint = C.Sub, modifier = Modifier.size(20.dp))
+        }
+        if (expanded) Text("${m.nickname}님이 고정함", color = C.Sub, fontSize = 12.sp, modifier = Modifier.padding(start = 29.dp, top = 6.dp))
+    }
+}
+
+/**
+ * 채팅 목록. 사용자가 직접 위로 올렸을 때만 자동 스크롤을 멈춤.
+ * (위치 인덱스로 판단하면 PIP 복귀 직후처럼 채팅이 한꺼번에 몰려올 때 기준이 밀려 멈춰버림)
+ * fontScale: 가로 전체화면 패널에서는 글자를 조금 작게.
+ */
+@Composable
+private fun ChatMessages(modifier: Modifier, fontScale: Float = 1f) {
+    val messages by Session.chat.messages.collectAsState()
+    val cleanBot by Prefs.cleanBot.collectAsState()
     val visible = if (cleanBot) messages.filter { !it.blinded } else messages
     val listState = rememberLazyListState()
-    // 사용자가 직접 위로 올렸을 때만 자동 스크롤을 멈춤.
-    // (위치 인덱스로 판단하면 PIP 복귀 직후처럼 채팅이 한꺼번에 몰려올 때 기준이 밀려 멈춰버림)
     var follow by remember { mutableStateOf(true) }
     var userDragged by remember { mutableStateOf(false) }
     LaunchedEffect(listState) {
@@ -399,52 +489,33 @@ private fun LiveInfoAndChat(cur: NowPlaying.Live) {
     LaunchedEffect(visible.lastOrNull()?.id, follow) {
         if (follow && visible.isNotEmpty()) listState.scrollToItem(0)
     }
-    Column {
-        Box(Modifier.weight(1f).fillMaxWidth()) {
-            LazyColumn(state = listState, reverseLayout = true, modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)) {
-                items(visible.asReversed(), key = { it.id }) { ChatLine(it) }
-            }
-            if (infoOpen) {
-                // 바깥(채팅 부분)을 누르면 닫힘
-                Box(Modifier.fillMaxSize().background(Color(0x88000000))
-                    .clickable(remember { MutableInteractionSource() }, null) { infoOpen = false })
-                Column(Modifier.fillMaxWidth().background(C.Surface, RoundedCornerShape(bottomStart = 14.dp, bottomEnd = 14.dp))
-                    .clickable(remember { MutableInteractionSource() }, null) { }   // 패널 안 터치가 뒤로 새지 않게
-                    .padding(horizontal = 16.dp, vertical = 12.dp)) {
-                    Text(d?.liveTitle ?: "", color = C.Text, fontSize = 17.sp, fontWeight = FontWeight.Bold, maxLines = 3,
-                        overflow = TextOverflow.Ellipsis)
-                    Spacer(Modifier.height(6.dp))
-                    TagRow(d?.tags ?: emptyList(), d?.liveCategoryValue)
-                    Spacer(Modifier.height(6.dp))
-                    if (d != null) {
-                        val up = remember(tick, d.openDate) { uptime(d.openDate) ?: "" }
-                        Text("${fmtCount(d.concurrentUserCount)}명 시청 중 · $up 스트리밍 중", color = C.Sub, fontSize = 13.sp)
-                    }
-                    Spacer(Modifier.height(10.dp))
-                    d?.channel?.let { ch ->
-                        Box(Modifier.clickable { Nav.openChannel(ch.channelId) }) {
-                            ChannelLine(ch.channelName, ch.channelImageUrl, ch.verifiedMark, 32.dp)
-                        }
-                    }
-                    if (user?.loggedIn == true) PowerBar { showPrediction = true }
-                }
-            }
-            if (!follow) {
-                Text("↓ 최신 채팅 보기", color = Color.Black, fontSize = 13.sp, fontWeight = FontWeight.Bold,
-                    modifier = Modifier.align(Alignment.BottomCenter).padding(8.dp).clip(RoundedCornerShape(16.dp))
-                        .background(C.Accent).clickable { follow = true }.padding(horizontal = 14.dp, vertical = 7.dp))
-            }
+    Box(modifier) {
+        LazyColumn(state = listState, reverseLayout = true, modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp)) {
+            items(visible.asReversed(), key = { it.id }) { ChatLine(it, fontScale) }
         }
-        ChatInput(loggedIn = user?.loggedIn == true, canSend = canSend, chatActive = d?.chatActive != false) { showCheese = true }
+        if (!follow) {
+            Text("↓ 최신 채팅 보기", color = Color.Black, fontSize = 13.sp, fontWeight = FontWeight.Bold,
+                modifier = Modifier.align(Alignment.BottomCenter).padding(8.dp).clip(RoundedCornerShape(16.dp))
+                    .background(C.Accent).clickable { follow = true }.padding(horizontal = 14.dp, vertical = 7.dp))
+        }
     }
 }
 
 @Composable
-private fun ChatLine(m: ChatMessage) {
+private fun ChatLine(m: ChatMessage, fontScale: Float = 1f) {
     val inline = remember(m.id) { mutableMapOf<String, InlineTextContent>() }
     val text = remember(m.id) {
         buildAnnotatedString {
+            // 닉네임 앞 배지
+            m.badges.forEachIndexed { i, url ->
+                val id = "b$i"
+                appendInlineContent(id, " ")
+                inline[id] = InlineTextContent(Placeholder((19 * fontScale).sp, (19 * fontScale).sp, PlaceholderVerticalAlign.Center)) {
+                    AsyncImage(url, null, Modifier.fillMaxSize().padding(end = 2.dp), contentScale = ContentScale.Fit)
+                }
+            }
+            if (m.badges.isNotEmpty()) append(" ")
             withStyle(SpanStyle(color = if (m.isStreamer) C.Accent else C.nick(m.userIdHash), fontWeight = FontWeight.SemiBold)) {
                 append(m.nickname)
             }
@@ -475,7 +546,7 @@ private fun ChatLine(m: ChatMessage) {
         }
     }
     val bg = if (m.donation > 0) Modifier.background(Color(0x22FFC857), RoundedCornerShape(6.dp)) else Modifier
-    Text(text, inlineContent = inline, color = C.Text, fontSize = 15.sp, lineHeight = 21.sp,
+    Text(text, inlineContent = inline, color = C.Text, fontSize = (15 * fontScale).sp, lineHeight = (21 * fontScale).sp,
         modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp).then(bg).padding(horizontal = 2.dp))
 }
 
@@ -510,6 +581,27 @@ private fun ChatInput(loggedIn: Boolean, canSend: Boolean, chatActive: Boolean, 
                 }
             }
         }
+    }
+}
+
+/** 가로 전체화면 오른쪽 채팅 패널 (화면 너비의 약 1/3) */
+@Composable
+private fun LandscapeChatPanel(cur: NowPlaying.Live, onClose: () -> Unit) {
+    val canSend by Session.chat.canSend.collectAsState()
+    val user by Auth.user.collectAsState()
+    var showCheese by remember { mutableStateOf(false) }
+    if (showCheese) CheeseSheet { showCheese = false }
+    val width = (LocalConfiguration.current.screenWidthDp * 0.34f).dp.coerceIn(260.dp, 420.dp)
+    Column(Modifier.width(width).fillMaxHeight().background(Color(0xF0141517)).blockTouches()
+        .navigationBarsPadding().imePadding()) {
+        Row(Modifier.fillMaxWidth().padding(start = 14.dp, end = 4.dp, top = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("채팅", color = C.Text, fontSize = 15.sp, fontWeight = FontWeight.Bold, modifier = Modifier.weight(1f))
+            cur.detail?.let { Text("${fmtCount(it.concurrentUserCount)}명", color = C.Sub, fontSize = 12.sp) }
+            IconButton(onClose) { Icon(Icons.Filled.Close, "채팅 닫기", tint = C.Sub, modifier = Modifier.size(20.dp)) }
+        }
+        HorizontalDivider(color = C.Surface2)
+        ChatMessages(Modifier.weight(1f).fillMaxWidth(), fontScale = 0.9f)
+        ChatInput(loggedIn = user?.loggedIn == true, canSend = canSend, chatActive = cur.detail?.chatActive != false) { showCheese = true }
     }
 }
 
