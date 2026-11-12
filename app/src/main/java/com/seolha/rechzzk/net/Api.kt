@@ -207,6 +207,9 @@ object Api {
 
     suspend fun setChannelAlert(id: String, on: Boolean) { writeRaw(if (on) "PUT" else "DELETE", url("$BASE/v1/channels/$id/notification"), "{}") }
 
+    /** 채널에서 쓸 수 있는 이모티콘 묶음 (로그인하면 구독 이모티콘의 잠금 여부까지 내려옴) */
+    suspend fun emojiPacks(channelId: String) = get(url("$BASE/v1/channels/$channelId/emoji-packs"), EmojiPacks.serializer())
+
     fun parsePlayback(detail: LiveDetail): LivePlayback? =
         detail.livePlaybackJson?.let { runCatching { Http.json.decodeFromString(LivePlayback.serializer(), it) }.getOrNull() }
 }

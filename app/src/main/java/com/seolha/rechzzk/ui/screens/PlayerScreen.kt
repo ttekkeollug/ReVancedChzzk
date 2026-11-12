@@ -36,6 +36,7 @@ import androidx.compose.foundation.text.appendInlineContent
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.EmojiEmotions
 import androidx.compose.foundation.border
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.PushPin
@@ -80,6 +81,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -551,35 +553,57 @@ private fun ChatLine(m: ChatMessage, fontScale: Float = 1f) {
 }
 
 @Composable
-private fun ChatInput(loggedIn: Boolean, canSend: Boolean, chatActive: Boolean, onCheese: () -> Unit) {
+private fun ChatInput(loggedIn: Boolean, canSend: Boolean, chatActive: Boolean, pickerHeight: androidx.compose.ui.unit.Dp = 260.dp,
+                      onCheese: () -> Unit) {
     var text by remember { mutableStateOf("") }
-    Row(Modifier.fillMaxWidth().background(C.Bg).padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically) {
-        when {
-            !loggedIn -> Text("로그인하고 채팅에 참여하기", color = C.Sub, fontSize = 15.sp,
-                modifier = Modifier.weight(1f).clip(RoundedCornerShape(24.dp)).background(C.Surface2)
-                    .clickable { Nav.push(Route.Login) }.padding(horizontal = 18.dp, vertical = 13.dp))
-            !chatActive -> Text("채팅이 비활성화된 방송입니다", color = C.Dim, fontSize = 15.sp,
-                modifier = Modifier.weight(1f).padding(12.dp))
-            else -> {
-                val send: () -> Unit = {
-                    if (text.isNotBlank() && Session.chat.send(text.trim())) text = ""
-                }
-                TextField(text, { text = it.take(100) }, enabled = canSend, singleLine = true,
-                    placeholder = { Text(if (canSend) "채팅을 입력해 주세요." else "채팅 연결 중…") },
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(onSend = { send() }),
-                    shape = RoundedCornerShape(24.dp),
-                    colors = TextFieldDefaults.colors(focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent,
-                        disabledIndicatorColor = Color.Transparent, focusedContainerColor = C.Surface2,
-                        unfocusedContainerColor = C.Surface2, disabledContainerColor = C.Surface2, cursorColor = C.Accent),
-                    modifier = Modifier.weight(1f))
-                if (text.isNotBlank()) IconButton(send, enabled = canSend) {
-                    Icon(Icons.AutoMirrored.Filled.Send, "전송", tint = C.Accent)
-                } else IconButton(onCheese) {   // 입력이 비어 있으면 치즈 후원 버튼
-                    Text("🧀", fontSize = 24.sp)
+    var showEmoji by remember { mutableStateOf(false) }
+    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    val focus = androidx.compose.ui.platform.LocalFocusManager.current
+    val packs by Session.emojiPacks.collectAsState()
+    val emojiMap = remember(packs) { Session.usableEmojis() }
+    // 이모티콘 창이 열려 있으면 뒤로가기로 먼저 닫음
+    BackHandler(enabled = showEmoji) { showEmoji = false }
+
+    Column(Modifier.fillMaxWidth().background(C.Bg)) {
+        if (loggedIn && chatActive) EmojiPreview(text, emojiMap)
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+            when {
+                !loggedIn -> Text("로그인하고 채팅에 참여하기", color = C.Sub, fontSize = 15.sp,
+                    modifier = Modifier.weight(1f).clip(RoundedCornerShape(24.dp)).background(C.Surface2)
+                        .clickable { Nav.push(Route.Login) }.padding(horizontal = 18.dp, vertical = 13.dp))
+                !chatActive -> Text("채팅이 비활성화된 방송입니다", color = C.Dim, fontSize = 15.sp,
+                    modifier = Modifier.weight(1f).padding(12.dp))
+                else -> {
+                    val send: () -> Unit = {
+                        if (text.isNotBlank() && Session.chat.send(text.trim(), emojiMap)) { text = ""; showEmoji = false }
+                    }
+                    TextField(text, { text = it.take(100) }, enabled = canSend, singleLine = true,
+                        placeholder = { Text(if (canSend) "채팅을 입력해 주세요." else "채팅 연결 중…") },
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                        keyboardActions = KeyboardActions(onSend = { send() }),
+                        shape = RoundedCornerShape(24.dp),
+                        trailingIcon = {
+                            // 공식 앱처럼 입력칸 안쪽 오른쪽에 이모티콘 버튼
+                            IconButton({
+                                if (showEmoji) { showEmoji = false } else { keyboard?.hide(); focus.clearFocus(); showEmoji = true }
+                            }, enabled = canSend) {
+                                Icon(Icons.Filled.EmojiEmotions, "이모티콘", tint = if (showEmoji) C.Accent else C.Sub)
+                            }
+                        },
+                        colors = TextFieldDefaults.colors(focusedIndicatorColor = Color.Transparent, unfocusedIndicatorColor = Color.Transparent,
+                            disabledIndicatorColor = Color.Transparent, focusedContainerColor = C.Surface2,
+                            unfocusedContainerColor = C.Surface2, disabledContainerColor = C.Surface2, cursorColor = C.Accent),
+                        modifier = Modifier.weight(1f).onFocusChanged { if (it.isFocused) showEmoji = false })
+                    if (text.isNotBlank()) IconButton(send, enabled = canSend) {
+                        Icon(Icons.AutoMirrored.Filled.Send, "전송", tint = C.Accent)
+                    } else IconButton(onCheese) {   // 입력이 비어 있으면 치즈 후원 버튼
+                        Text("🧀", fontSize = 24.sp)
+                    }
                 }
             }
+        }
+        if (showEmoji && loggedIn && chatActive) {
+            EmojiPicker(pickerHeight) { token -> if (text.length + token.length <= 100) text += token }
         }
     }
 }
@@ -601,7 +625,7 @@ private fun LandscapeChatPanel(cur: NowPlaying.Live, onClose: () -> Unit) {
         }
         HorizontalDivider(color = C.Surface2)
         ChatMessages(Modifier.weight(1f).fillMaxWidth(), fontScale = 0.9f)
-        ChatInput(loggedIn = user?.loggedIn == true, canSend = canSend, chatActive = cur.detail?.chatActive != false) { showCheese = true }
+        ChatInput(loggedIn = user?.loggedIn == true, canSend = canSend, chatActive = cur.detail?.chatActive != false, pickerHeight = 170.dp) { showCheese = true }
     }
 }
 

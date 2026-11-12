@@ -5,6 +5,7 @@ import com.seolha.rechzzk.LatencyMode
 import com.seolha.rechzzk.Prefs
 import com.seolha.rechzzk.chat.ChatClient
 import com.seolha.rechzzk.net.Api
+import com.seolha.rechzzk.net.EmojiPack
 import com.seolha.rechzzk.net.LiveDetail
 import com.seolha.rechzzk.net.LogPower
 import com.seolha.rechzzk.net.Prediction
@@ -66,6 +67,18 @@ object Session {
     private val _prediction = MutableStateFlow<Prediction?>(null)
     val prediction: StateFlow<Prediction?> = _prediction.asStateFlow()
 
+    private val _emojiPacks = MutableStateFlow<List<EmojiPack>>(emptyList())
+    /** 현재 방송 채널에서 쓸 수 있는 이모티콘 묶음 */
+    val emojiPacks: StateFlow<List<EmojiPack>> = _emojiPacks.asStateFlow()
+
+    /** 잠기지 않은(쓸 수 있는) 이모티콘 ID → 이미지 주소 */
+    fun usableEmojis(): Map<String, String> =
+        _emojiPacks.value.flatMap { p -> p.display.filter { p.usable(it) } }.associate { it.emojiId to it.imageUrl }
+
+    private fun loadEmojis(channelId: String) {
+        scope.launch { _emojiPacks.value = runCatching { Api.emojiPacks(channelId).all }.getOrDefault(emptyList()) }
+    }
+
     /** "통나무 +N" 같은 짧은 안내 */
     val toasts = MutableSharedFlow<String>(extraBufferCapacity = 8)
 
@@ -97,6 +110,7 @@ object Session {
             _now.value = NowPlaying.Live(channelId, detail)
             if (!startPlayer(detail, Prefs.latency.value)) return@launch
             detail.chatChannelId?.let { chat.connect(it, channelId) }
+            loadEmojis(channelId)
             pollJob = scope.launch { pollDetail(channelId) }
             powerJob = scope.launch { pollPower(channelId) }
         }
@@ -137,6 +151,7 @@ object Session {
         val cid = cur.detail?.chatChannelId ?: return
         if (cur.error == null) {
             chat.connect(cid, cur.channelId)
+            loadEmojis(cur.channelId)   // 로그인 상태에 따라 구독 이모티콘 잠금이 달라짐
             powerJob?.cancel()
             if (!Auth.loggedIn) { _power.value = null; _prediction.value = null }
             powerJob = scope.launch { pollPower(cur.channelId) }
@@ -234,7 +249,7 @@ object Session {
 
     private fun stopInternal() {
         loadJob?.cancel(); pollJob?.cancel(); powerJob?.cancel()
-        _power.value = null; _prediction.value = null
+        _power.value = null; _prediction.value = null; _emojiPacks.value = emptyList()
         chat.disconnect()
         PlayerHolder.stop()
     }

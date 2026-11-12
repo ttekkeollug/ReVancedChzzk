@@ -13,8 +13,8 @@ android {
         applicationId = "com.seolha.rechzzk"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "1.0.2"
+        versionCode = 7
+        versionName = "1.0.6"
     }
 
     // 환경변수(RELEASE_STORE_FILE 등)로 서명 키가 주어지면 사용, 없으면 디버그 키로 서명
@@ -69,6 +69,7 @@ dependencies {
     implementation("com.google.guava:guava:33.4.0-android")
     implementation("io.coil-kt.coil3:coil-compose:3.1.0")
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.1.0")
+    implementation("io.coil-kt.coil3:coil-gif:3.1.0")   // 움직이는 이모티콘(GIF·애니메이션 WebP)
 
     testImplementation("junit:junit:4.13.2")
 }

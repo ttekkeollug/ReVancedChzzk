@@ -59,6 +59,17 @@ object Prefs {
     /** 가로 전체화면에서 채팅 패널 열림 여부 (마지막 상태 기억) */
     val landscapeChat: StateFlow<Boolean> = _landscapeChat.asStateFlow()
 
+    private val _recentEmojis = MutableStateFlow<List<com.seolha.rechzzk.net.Emoji>>(emptyList())
+    /** 최근 사용한 이모티콘 (최신순, 최대 30개) */
+    val recentEmojis: StateFlow<List<com.seolha.rechzzk.net.Emoji>> = _recentEmojis.asStateFlow()
+
+    fun addRecentEmoji(e: com.seolha.rechzzk.net.Emoji) {
+        val list = (listOf(e) + _recentEmojis.value.filter { it.emojiId != e.emojiId }).take(30)
+        _recentEmojis.value = list
+        sp.edit().putString("recentEmojis", com.seolha.rechzzk.net.Http.json.encodeToString(
+            kotlinx.serialization.builtins.ListSerializer(com.seolha.rechzzk.net.Emoji.serializer()), list)).apply()
+    }
+
     lateinit var raw: SharedPreferences
         private set
 
@@ -73,6 +84,10 @@ object Prefs {
         _alertAll.value = sp.getBoolean("alertAll", false)
         _fastAlerts.value = sp.getBoolean("fastAlerts", true)
         _landscapeChat.value = sp.getBoolean("landscapeChat", true)
+        _recentEmojis.value = runCatching {
+            com.seolha.rechzzk.net.Http.json.decodeFromString(
+                kotlinx.serialization.builtins.ListSerializer(com.seolha.rechzzk.net.Emoji.serializer()), sp.getString("recentEmojis", "[]")!!)
+        }.getOrDefault(emptyList())
         raw = sp
     }
 

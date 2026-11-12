@@ -211,13 +211,18 @@ class ChatClient(private val scope: CoroutineScope) {
         _messages.update { (it + items).takeLast(MAX) }
     }
 
-    fun send(text: String): Boolean {
+    /**
+     * 채팅 전송. 메시지 안의 {:이모티콘ID:}는 emojis(ID → 이미지 주소)에 함께 담아 보내야
+     * 다른 시청자 화면에서 이미지로 보임.
+     */
+    fun send(text: String, emojis: Map<String, String> = emptyMap()): Boolean {
         val socket = ws ?: return false
         if (!_canSend.value || text.isBlank()) return false
+        val used = EMOJI_TOKEN.findAll(text).map { it.groupValues[1] }.toSet()
         val extras = buildJsonObject {
             put("chatType", "STREAMING"); put("osType", "PC")
             put("extraToken", extraToken); put("streamingChannelId", streamingChannelId)
-            put("emojis", buildJsonObject { })
+            put("emojis", buildJsonObject { used.forEach { id -> emojis[id]?.let { put(id, it) } } })
         }
         val msg = buildJsonObject {
             put("ver", "3"); put("cmd", 3101); put("svcid", "game"); put("cid", chatChannelId)
@@ -239,5 +244,8 @@ class ChatClient(private val scope: CoroutineScope) {
         _canSend.value = false
     }
 
-    companion object { const val MAX = 300 }
+    companion object {
+        const val MAX = 300
+        val EMOJI_TOKEN = Regex("\\{:([^:{}]+):\\}")
+    }
 }

@@ -92,7 +92,19 @@ private fun ClipFeed() {
     val feedPlayer = remember {
         ExoPlayer.Builder(ctx).build().apply { repeatMode = Player.REPEAT_MODE_ONE }
     }
-    DisposableEffect(Unit) { onDispose { feedPlayer.release() } }
+    // 클립이 재생되는 동안 화면이 꺼지지 않게 (클립 피드는 별도 플레이어라 따로 처리)
+    val view = androidx.compose.ui.platform.LocalView.current
+    DisposableEffect(Unit) {
+        val l = object : Player.Listener {
+            override fun onIsPlayingChanged(isPlaying: Boolean) { view.keepScreenOn = isPlaying }
+        }
+        feedPlayer.addListener(l)
+        onDispose {
+            feedPlayer.removeListener(l)
+            view.keepScreenOn = false
+            feedPlayer.release()
+        }
+    }
     // 앱이 백그라운드로 가면 클립 피드 정지 (메인 플레이어와 달리 서비스에 묶여 있지 않음)
     val lifecycle = androidx.lifecycle.compose.LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle) {

@@ -267,3 +267,43 @@ data class FollowInfo(val channel: FollowChannel? = null)
 
 @Serializable
 data class FollowChannel(val personalData: PersonalData? = null)
+
+// ── 이모티콘 ──
+@Serializable
+data class EmojiPacks(
+    val emojiPacks: List<EmojiPack>? = null,
+    val cheatKeyEmojiPacks: List<EmojiPack>? = null,
+    val subscriptionEmojiPacks: List<EmojiPack>? = null,
+) {
+    /** 구독 이모티콘 → 기본 → 치트키 순서 (공식 앱과 같은 배치) */
+    val all: List<EmojiPack> get() = subscriptionEmojiPacks.orEmpty() + emojiPacks.orEmpty() + cheatKeyEmojiPacks.orEmpty()
+}
+
+@Serializable
+data class EmojiPack(
+    val emojiPackId: String = "",
+    val emojiPackName: String = "",
+    val emojiPackImageUrl: String? = null,
+    /** 구독하지 않은 채널의 구독 이모티콘처럼 아직 쓸 수 없는 묶음이면 true */
+    val emojiPackLocked: Boolean = false,
+    val emojis: List<Emoji> = emptyList(),
+    /** 채널(구독) 이모티콘은 구독 단계별로 따로 옴 */
+    val tier1Emojis: List<Emoji>? = null,
+    val tier2Emojis: List<Emoji>? = null,
+    val emojiTier2Locked: Boolean = false,
+) {
+    val isChannelPack: Boolean get() = tier1Emojis != null || tier2Emojis != null
+
+    /** 화면에 보여줄 전체 이모티콘 (기본 묶음은 emojis, 채널 묶음은 1단계 + 2단계) */
+    val display: List<Emoji> get() = (emojis + tier1Emojis.orEmpty() + tier2Emojis.orEmpty()).distinctBy { it.emojiId }
+
+    /** 지금 쓸 수 있는지 (묶음 잠금, 2단계 구독 잠금 반영) */
+    fun usable(e: Emoji): Boolean = when {
+        emojiPackLocked -> false
+        tier2Emojis.orEmpty().any { it.emojiId == e.emojiId } && tier1Emojis.orEmpty().none { it.emojiId == e.emojiId } -> !emojiTier2Locked
+        else -> true
+    }
+}
+
+@Serializable
+data class Emoji(val emojiId: String = "", val imageUrl: String = "")

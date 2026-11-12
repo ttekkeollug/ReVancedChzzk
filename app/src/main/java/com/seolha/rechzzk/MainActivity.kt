@@ -81,7 +81,10 @@ class MainActivity : ComponentActivity() {
     private var controllerFuture: ListenableFuture<MediaController>? = null
 
     private val playerListener = object : Player.Listener {
-        override fun onIsPlayingChanged(isPlaying: Boolean) = updatePipParams()
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            updatePipParams()
+            updateKeepScreenOn()
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -95,7 +98,10 @@ class MainActivity : ComponentActivity() {
         }
         PlayerHolder.player.addListener(playerListener)
         lifecycleScope.launch {
-            combine(Session.now, PlayerHolder.radio, Prefs.autoPip) { _, _, _ -> }.collect { updatePipParams() }
+            combine(Session.now, PlayerHolder.radio, Prefs.autoPip) { _, _, _ -> }.collect {
+                updatePipParams()
+                updateKeepScreenOn()
+            }
         }
         // 로그인/로그아웃 시 채팅을 다시 연결해 전송 권한 갱신
         lifecycleScope.launch {
@@ -138,6 +144,16 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         PlayerHolder.player.removeListener(playerListener)
         super.onDestroy()
+    }
+
+    /**
+     * 영상이 재생 중이면 화면이 자동으로 꺼지지 않게 함.
+     * 일시정지·라디오 모드(소리만)일 때는 평소처럼 꺼지도록 해제.
+     */
+    private fun updateKeepScreenOn() {
+        val on = PlayerHolder.player.isPlaying && !PlayerHolder.radio.value
+        if (on) window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        else window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     }
 
     private fun keepPlayingInBackground() = PlayerHolder.radio.value && Prefs.backgroundPlay.value
