@@ -98,11 +98,18 @@ private fun NaverLoginWebView(onClose: () -> Unit) {
                 webViewClient = object : WebViewClient() {
                     override fun onPageFinished(view: WebView, url: String) {
                         CookieManager.getInstance().flush()
+                        // "로그인 상태 유지"를 자동으로 켬 → 쿠키가 앱을 다시 켜도 남는 장기 쿠키로 저장됨
+                        if (url.contains("nid.naver.com")) {
+                            view.evaluateJavascript(
+                                "(function(){var c=document.getElementById('loginStay');" +
+                                "if(c&&!c.checked){c.click();if(!c.checked){c.checked=true;c.value='on';}}})();", null)
+                        }
                         // 로그인 완료 후 치지직으로 리다이렉트되면 쿠키를 확인하고 닫음
                         // 로그인 폼이 아닌 페이지에서 NID_AUT 쿠키가 생기면 로그인 완료로 판단
                         val done = CookieManager.getInstance().getCookie("https://chzzk.naver.com")?.contains("NID_AUT") == true
                         if (done && !url.contains("nidlogin.login")) {
                             Auth.refresh()
+                            Auth.backupCookies()
                             onClose()
                         }
                     }

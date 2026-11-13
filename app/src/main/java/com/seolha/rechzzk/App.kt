@@ -17,7 +17,7 @@ class App : Application(), SingletonImageLoader.Factory {
         super.onCreate()
         Prefs.init(this)
         PlayerHolder.init(this)
-        Auth.refresh()
+        Auth.init()
         com.seolha.rechzzk.notify.LiveAlerts.setup(this)
     }
 

@@ -34,7 +34,17 @@ object Http {
             builder.header("Origin", "https://chzzk.naver.com")
             builder.header("Referer", "https://chzzk.naver.com/")
         }
-        chain.proceed(builder.build())
+        val res = chain.proceed(builder.build())
+        // 네이버가 응답으로 갱신해 주는 로그인 쿠키를 WebView 쿠키 저장소에 반영 (버리면 나중에 만료돼 로그아웃됨)
+        if (host.endsWith("naver.com")) {
+            val setCookies = res.headers("Set-Cookie")
+            if (setCookies.isNotEmpty()) runCatching {
+                val cm = CookieManager.getInstance()
+                setCookies.forEach { cm.setCookie(req.url.toString(), it) }
+                cm.flush()
+            }
+        }
+        res
     }
 
     val client: OkHttpClient = OkHttpClient.Builder()

@@ -81,6 +81,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.gestures.draggable
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.Color
@@ -243,8 +248,33 @@ fun PlayerScreen() {
             }
         }
     } else {
-        Column(Modifier.fillMaxSize().blockTouches().background(C.Bg).statusBarsPadding().navigationBarsPadding().imePadding()) {
-            Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f)) {
+        // 영상을 아래로 끌면 화면이 손가락을 따라 내려가고, 충분히 내리거나 빠르게 튕기면 미니 플레이어로 전환
+        val dragY = remember { androidx.compose.animation.core.Animatable(0f) }
+        val dragScope = rememberCoroutineScope()
+        var screenH by remember { mutableFloatStateOf(1f) }
+        val dragState = androidx.compose.foundation.gestures.rememberDraggableState { delta ->
+            dragScope.launch { dragY.snapTo((dragY.value + delta).coerceAtLeast(0f)) }
+        }
+        Column(Modifier.fillMaxSize()
+            .onSizeChanged { screenH = it.height.toFloat().coerceAtLeast(1f) }
+            .graphicsLayer {
+                val p = (dragY.value / screenH).coerceIn(0f, 1f)
+                translationY = dragY.value
+                scaleX = 1f - p * 0.15f; scaleY = scaleX
+                alpha = 1f - p * 0.6f
+                transformOrigin = androidx.compose.ui.graphics.TransformOrigin(1f, 0f)
+            }
+            .blockTouches().background(C.Bg).statusBarsPadding().navigationBarsPadding().imePadding()) {
+            Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f)
+                .draggable(dragState, androidx.compose.foundation.gestures.Orientation.Vertical,
+                    onDragStopped = { velocity ->
+                        if (dragY.value > screenH * 0.22f || velocity > 1800f) {
+                            dragY.animateTo(screenH, androidx.compose.animation.core.tween(160))
+                            Nav.pop()   // 재생은 그대로, 미니 플레이어로 전환
+                        } else {
+                            dragY.animateTo(0f, androidx.compose.animation.core.spring())
+                        }
+                    })) {
                 PlayerSurface(Modifier.fillMaxSize())
                 PlayerControls(cur, st, controls, fullscreen = false, onMore = { showSheet = true })
             }

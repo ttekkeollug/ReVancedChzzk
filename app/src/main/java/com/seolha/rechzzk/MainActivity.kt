@@ -129,6 +129,7 @@ class MainActivity : ComponentActivity() {
         super.onStart()
         // 앱을 열 때마다 빠른 알림 알람 예약 상태를 설정과 맞춤
         com.seolha.rechzzk.notify.FastAlerts.sync(this)
+        Auth.refresh()  // 앱으로 돌아올 때 로그인 상태 다시 확인 (실패해도 이전 상태 유지)
         // MediaController로 서비스에 연결해 두면 백그라운드 재생 시 알림·포그라운드 서비스가 유지됨
         val token = SessionToken(this, ComponentName(this, PlaybackService::class.java))
         controllerFuture = MediaController.Builder(this, token).buildAsync()
