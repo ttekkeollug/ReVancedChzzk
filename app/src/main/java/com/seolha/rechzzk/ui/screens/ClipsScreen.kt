@@ -36,6 +36,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import kotlinx.coroutines.launch
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -67,14 +68,21 @@ import com.seolha.rechzzk.ui.components.fmtShort
 @Composable
 fun ClipsScreen() {
     var tab by rememberSaveable { mutableIntStateOf(0) }
+    // 좌우로 밀어 추천 ↔ 인기 (추천 클립은 위아래로 넘기는 피드라 서로 겹치지 않음)
+    val pager = androidx.compose.foundation.pager.rememberPagerState(initialPage = tab) { 2 }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(pager) { androidx.compose.runtime.snapshotFlow { pager.settledPage }.collect { tab = it } }
     Box(Modifier.fillMaxSize()) {
-        if (tab == 0) ClipFeed() else PopularClips()
+        androidx.compose.foundation.pager.HorizontalPager(pager, Modifier.fillMaxSize(), key = { it }) { page ->
+            if (page == 0) ClipFeed() else PopularClips()
+        }
+        val sel = pager.targetPage
         Row(Modifier.statusBarsPadding().padding(start = 16.dp, top = 12.dp)) {
             listOf("추천", "인기").forEachIndexed { i, t ->
-                Column(Modifier.padding(end = 18.dp).clickable { tab = i }) {
-                    Text(t, color = if (i == tab) Color.White else Color(0x99FFFFFF), fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                Column(Modifier.padding(end = 18.dp).clickable { scope.launch { pager.animateScrollToPage(i) } }) {
+                    Text(t, color = if (i == sel) Color.White else Color(0x99FFFFFF), fontSize = 24.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(6.dp))
-                    Box(Modifier.width(40.dp).height(3.dp).background(if (i == tab) Color.White else Color.Transparent))
+                    Box(Modifier.width(40.dp).height(3.dp).background(if (i == sel) Color.White else Color.Transparent))
                 }
             }
         }

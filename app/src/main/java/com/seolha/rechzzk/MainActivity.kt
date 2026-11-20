@@ -201,16 +201,45 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /** 전체화면 여부 (화면 방향과 따로 관리 — 태블릿은 가로가 기본이라 방향으로 판단하면 안 됨) */
+    private var fullscreenState by mutableStateOf(false)
+    val isFullscreen: Boolean get() = fullscreenState
+
+    /** sw600dp 이상(Y700 같은 태블릿)은 화면 방향을 앱이 바꾸지 않음 */
+    val isTablet: Boolean get() = resources.configuration.smallestScreenWidthDp >= 600
+
+    private var portraitWaiter: android.view.OrientationEventListener? = null
+
     fun setFullscreen(on: Boolean) {
-        requestedOrientation = if (on) ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE else ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        fullscreenState = on
         val ctl = WindowCompat.getInsetsController(window, window.decorView)
         if (on) {
             ctl.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
             ctl.hide(WindowInsetsCompat.Type.systemBars())
         } else {
             ctl.show(WindowInsetsCompat.Type.systemBars())
-            // 세로로 고정했다가 다시 자동 회전 허용
-            window.decorView.postDelayed({ requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED }, 1500)
+        }
+        if (isTablet) {
+            // 태블릿: 방향은 사용자가 든 대로. 전체화면은 상태바·내비게이션 바만 숨김
+            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+            return
+        }
+        portraitWaiter?.disable(); portraitWaiter = null
+        if (on) {
+            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        } else {
+            // 휴대폰: 세로로 고정해 두고, 실제로 휴대폰을 세워 들었을 때만 자동 회전을 다시 허용.
+            // (예전엔 1.5초 뒤 무조건 풀어서, 가로로 들고 있으면 다시 가로로 돌아가 화면이 왔다 갔다 했음)
+            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            portraitWaiter = object : android.view.OrientationEventListener(this) {
+                override fun onOrientationChanged(deg: Int) {
+                    if (deg == ORIENTATION_UNKNOWN) return
+                    if (deg <= 25 || deg >= 335) {   // 똑바로 세워 듦
+                        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+                        disable(); portraitWaiter = null
+                    }
+                }
+            }.also { if (it.canDetectOrientation()) it.enable() else requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED }
         }
     }
 }

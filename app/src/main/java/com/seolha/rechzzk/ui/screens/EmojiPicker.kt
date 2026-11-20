@@ -31,6 +31,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -68,7 +69,6 @@ private sealed interface PickerTab {
 @Composable
 fun EmojiPicker(height: Dp, onPick: (String) -> Unit) {
     val packs by Session.emojiPacks.collectAsState()
-    val recentAll by Prefs.recentEmojis.collectAsState()
     val user by Auth.user.collectAsState()
     val now by Session.now.collectAsState()
     val live = now as? NowPlaying.Live
@@ -77,7 +77,9 @@ fun EmojiPicker(height: Dp, onPick: (String) -> Unit) {
 
     // 최근 사용 중 지금 이 채널에서 쓸 수 있는 것만 (공식 웹과 같은 방식)
     val usable = remember(packs) { Session.usableEmojis() }
-    val recent = remember(recentAll, usable) { recentAll.filter { usable[it.emojiId] == it.imageUrl } }
+    // 창이 열려 있는 동안은 최근 사용 순서를 고정 (누를 때마다 순서가 바뀌면
+    // 누른 칸 아래로 다른 이모티콘이 밀려 들어와 한 번에 두 개가 입력되는 문제가 있었음)
+    val recent = remember(usable) { Prefs.recentEmojis.value.filter { usable[it.emojiId] == it.imageUrl } }
     val channelPacks = packs.filter { it.isChannelPack }
         .sortedByDescending { it.emojiPackId == channelId || it.emojiPackName == channelName }
     val otherPacks = packs.filter { !it.isChannelPack }
@@ -91,7 +93,16 @@ fun EmojiPicker(height: Dp, onPick: (String) -> Unit) {
     var sel by remember(packs.size, recent.isNotEmpty()) {
         mutableIntStateOf(tabs.indexOfFirst { it is PickerTab.Recent || (it is PickerTab.Pack && !it.pack.emojiPackLocked) }.coerceAtLeast(0))
     }
-    val pick: (Emoji) -> Unit = { e -> Prefs.addRecentEmoji(e); onPick("{:${e.emojiId}:}") }
+    // 한 번의 터치가 두 번 처리되는 경우 방지: 0.12초 안에 들어온 두 번째 입력은 무시(사람이 연속으로 누를 수 없는 간격)
+    var lastPickAt by remember { mutableLongStateOf(0L) }
+    val pick: (Emoji) -> Unit = { e ->
+        val t = android.os.SystemClock.uptimeMillis()
+        if (t - lastPickAt > 120) {
+            lastPickAt = t
+            Prefs.addRecentEmoji(e)
+            onPick("{:${e.emojiId}:}")
+        }
+    }
 
     Column(Modifier.fillMaxWidth().height(height).background(C.Surface)) {
         if (packs.isEmpty()) {

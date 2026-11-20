@@ -39,6 +39,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import kotlinx.coroutines.launch
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -96,6 +97,33 @@ fun TopTabs(tabs: List<String>, selected: Int, onSelect: (Int) -> Unit) {
     }
 }
 
+/**
+ * 위쪽 탭 + 좌우로 밀어서 탭 바꾸기.
+ * 탭 글자를 누르거나 화면을 옆으로 밀면 이동하고, 밀고 있는 동안 위쪽 탭 표시도 따라감.
+ * 가로로 스크롤되는 안쪽 목록(태그·칩·채널 아이콘 줄)은 그 목록이 먼저 움직이고, 끝에 닿으면 탭이 넘어감.
+ */
+@Composable
+fun SwipeTabs(titles: List<String>, tab: Int, onTab: (Int) -> Unit, modifier: Modifier = Modifier,
+              tabsOverlay: Boolean = false, content: @Composable (page: Int) -> Unit) {
+    val pager = androidx.compose.foundation.pager.rememberPagerState(initialPage = tab.coerceIn(0, titles.lastIndex)) { titles.size }
+    val scope = rememberCoroutineScope()
+    val currentOnTab by androidx.compose.runtime.rememberUpdatedState(onTab)
+    LaunchedEffect(pager) {
+        androidx.compose.runtime.snapshotFlow { pager.settledPage }.collect { currentOnTab(it) }
+    }
+    // 코드에서 탭을 바꾼 경우(예: '전체보기')에도 화면이 따라 이동
+    LaunchedEffect(tab) {
+        if (tab in titles.indices && pager.settledPage != tab && !pager.isScrollInProgress) pager.animateScrollToPage(tab)
+    }
+    val header: @Composable () -> Unit = {
+        TopTabs(titles, pager.targetPage) { scope.launch { pager.animateScrollToPage(it) } }
+    }
+    Column(modifier) {
+        if (!tabsOverlay) header()
+        androidx.compose.foundation.pager.HorizontalPager(pager, Modifier.fillMaxSize(), key = { it }) { page -> content(page) }
+    }
+}
+
 private val homeTabs = listOf("추천", "게임", "스포츠", "엔터", "기타")
 private val tabType = listOf(null, "GAME", "SPORTS", "ENTERTAINMENT", "ETC")
 
@@ -114,33 +142,37 @@ fun HomeScreen() {
         if (paged.items.isEmpty()) paged.refresh()
         hero = runCatching { Api.recommended().topRecommendedLives.firstOrNull() }.getOrNull()
     }
-    val type = tabType[tab]
+    Column(Modifier.fillMaxSize()) {
+        AppTopBar()
+        SwipeTabs(homeTabs, tab, { tab = it }, Modifier.fillMaxSize()) { page -> HomePage(page, paged, hero) }
+    }
+}
+
+/** 홈 탭 한 장 (추천·게임·스포츠·엔터·기타). 같은 라이브 목록을 분류별로 거름 */
+@Composable
+private fun HomePage(page: Int, paged: Paged<LiveItem>, hero: LiveItem?) {
+    val type = tabType[page]
     val list = if (type == null) paged.items.toList() else paged.items.filter { it.categoryType == type }
     val grid = rememberLazyGridState()
     val nearEnd by remember { derivedStateOf {
         val last = grid.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
         last >= grid.layoutInfo.totalItemsCount - 6
     } }
-    LaunchedEffect(nearEnd, tab) { if (nearEnd) paged.loadMore() }
-
-    Column(Modifier.fillMaxSize()) {
-        AppTopBar()
-        TopTabs(homeTabs, tab) { tab = it }
-        LazyVerticalGrid(GridCells.Fixed(2), state = grid, modifier = Modifier.fillMaxSize(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 16.dp, end = 16.dp, bottom = 96.dp)) {
-            val heroItem = if (tab == 0) hero ?: list.firstOrNull() else list.firstOrNull()
-            if (heroItem != null) item(span = { GridItemSpan(2) }) { HeroCard(heroItem) }
-            itemsIndexed(list.filter { it.liveId != heroItem?.liveId }, key = { _, l -> l.liveId }) { _, l ->
-                LiveGridCard(l) { l.channel?.channelId?.let(Nav::openLive) }
-            }
-            item(span = { GridItemSpan(2) }) {
-                when {
-                    paged.loading -> Loading()
-                    paged.error != null -> Message(paged.error!!, "다시 시도") { paged.loadMore() }
-                    list.isEmpty() && paged.end -> Message("방송이 없습니다")
-                    !paged.end && type != null && list.size < 6 -> LaunchedEffect(list.size) { paged.loadMore() }
-                }
+    LaunchedEffect(nearEnd) { if (nearEnd) paged.loadMore() }
+    LazyVerticalGrid(GridCells.Fixed(2), state = grid, modifier = Modifier.fillMaxSize(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 16.dp, end = 16.dp, bottom = 96.dp)) {
+        val heroItem = if (page == 0) hero ?: list.firstOrNull() else list.firstOrNull()
+        if (heroItem != null) item(span = { GridItemSpan(2) }) { HeroCard(heroItem) }
+        itemsIndexed(list.filter { it.liveId != heroItem?.liveId }, key = { _, l -> l.liveId }) { _, l ->
+            LiveGridCard(l) { l.channel?.channelId?.let(Nav::openLive) }
+        }
+        item(span = { GridItemSpan(2) }) {
+            when {
+                paged.loading -> Loading()
+                paged.error != null -> Message(paged.error!!, "다시 시도") { paged.loadMore() }
+                list.isEmpty() && paged.end -> Message("방송이 없습니다")
+                !paged.end && type != null && list.size < 6 -> LaunchedEffect(list.size) { paged.loadMore() }
             }
         }
     }

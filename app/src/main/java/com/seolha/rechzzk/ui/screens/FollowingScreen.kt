@@ -63,8 +63,8 @@ fun FollowingScreen() {
         channels = runCatching { Api.followings().followingList }.getOrDefault(emptyList())
     }
 
-    Column(Modifier.fillMaxSize()) {
-        TopTabs(listOf("전체", "라이브"), tab) { tab = it }
+    SwipeTabs(listOf("전체", "라이브"), tab, { tab = it }, Modifier.fillMaxSize()) { page ->
+      Column(Modifier.fillMaxSize()) {
         if (user?.loggedIn != true) {
             Message("로그인하면 팔로우한 채널을 볼 수 있습니다", "네이버 로그인") { Nav.push(Route.Login) }
             return@Column
@@ -74,7 +74,7 @@ fun FollowingScreen() {
 
         val sorted = list   // 서버에서 정렬해서 내려줌
         LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 96.dp)) {
-            if (tab == 0) {
+            if (page == 0) {
                 item { SectionTitle("라이브", list.size, if (list.size > 5) "전체보기" else null) { tab = 1 } }
                 items(sorted.take(5), key = { "l" + it.channelId }) { LiveRow(it) }
                 if (list.isEmpty()) item { Message("지금 방송 중인 채널이 없습니다") }
@@ -104,6 +104,7 @@ fun FollowingScreen() {
                 if (list.isEmpty()) item { Message("지금 방송 중인 채널이 없습니다") }
             }
         }
+      }
     }
 }
 

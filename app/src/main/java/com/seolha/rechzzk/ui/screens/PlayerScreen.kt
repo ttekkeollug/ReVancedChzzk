@@ -10,6 +10,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -23,6 +24,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -81,6 +83,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.animation.core.VectorConverter
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.draw.clipToBounds
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.layout.onSizeChanged
@@ -181,23 +187,28 @@ fun rememberPlayerUiState(): PlayerUiState {
     return st
 }
 
+/** 확대 중일 때 배율과 '원래대로' 버튼 표시 */
 @Composable
-fun PlayerSurface(modifier: Modifier = Modifier) {
+private fun BoxScope.ZoomBadge(zoom: ZoomState) {
+    if (!zoom.zoomed) return
+    Text("🔍 ${"%.1f".format(zoom.scale)}배  ·  원래대로", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold,
+        modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 44.dp).clip(RoundedCornerShape(14.dp))
+            .background(Color(0xAA000000)).clickable { zoom.reset() }.padding(horizontal = 12.dp, vertical = 6.dp))
+}
+
+@Composable
+fun PlayerSurface(modifier: Modifier = Modifier, zoom: ZoomState? = null) {
     val radio by PlayerHolder.radio.collectAsState()
     val now by Session.now.collectAsState()
-    Box(modifier.background(Color.Black), contentAlignment = Alignment.Center) {
+    Box(modifier.background(Color.Black).clipToBounds(), contentAlignment = Alignment.Center) {
         AndroidView(
             factory = {
-                PlayerView(it).apply {
-                    useController = false
-                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-                    setShutterBackgroundColor(android.graphics.Color.BLACK)
-                    setKeepContentOnPlayerReset(true)
-                }
+                // TextureView로 그려야 확대·끌기 애니메이션이 영상에도 적용됨 (SurfaceView는 따로 그려져 안 따라옴)
+                android.view.LayoutInflater.from(it).inflate(com.seolha.rechzzk.R.layout.player_view_texture, null) as PlayerView
             },
             update = { if (it.player !== PlayerHolder.player) it.player = PlayerHolder.player },
             onRelease = { it.player = null },
-            modifier = Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize().zoomed(zoom),
         )
         if (radio) {
             Column(Modifier.fillMaxSize().background(Color(0xFF101114)), horizontalAlignment = Alignment.CenterHorizontally,
@@ -221,22 +232,62 @@ fun PlayerScreen() {
     val landscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val st = rememberPlayerUiState()
     val controls = remember { ControlsUi() }
+    val zoom = remember { ZoomState() }
+    LaunchedEffect(now?.title, now?.channelName) { zoom.reset() }
     var showSheet by remember { mutableStateOf(false) }
 
+    val isFull = activity?.isFullscreen == true
+    // 휴대폰을 직접 가로로 돌리면 전체화면으로 처리 (상태바 숨김 + 가로 고정)
+    LaunchedEffect(landscape) {
+        if (activity != null && !activity.isTablet && landscape && !activity.isFullscreen) activity.setFullscreen(true)
+    }
+    // 전체화면인 채로 플레이어를 떠나면(미니 플레이어로 내림 등) 원래대로 (PIP 진입은 제외)
+    DisposableEffect(Unit) {
+        onDispose { if (activity != null && activity.isFullscreen && !activity.isInPictureInPictureMode) activity.setFullscreen(false) }
+    }
     BackHandler {
-        if (landscape) activity?.setFullscreen(false) else Nav.pop()
+        if (isFull) activity?.setFullscreen(false) else Nav.pop()
     }
     val cur = now ?: run { LaunchedEffect(Unit) { Nav.pop() }; return }
 
-    if (landscape) {
+    // 가로이거나 전체화면이면 영상 중심 화면 (세로로 든 태블릿에서 전체화면을 눌러도 영상이 꽉 차게)
+    if (landscape || isFull) {
         val chatOpen by Prefs.landscapeChat.collectAsState()
         val showChat = chatOpen && cur is NowPlaying.Live && cur.error == null
-        Box(Modifier.fillMaxSize().background(Color.Black).blockTouches()) {
+        Box(Modifier.fillMaxSize().background(Color.Black).blockTouches()
+            .then(if (!isFull) Modifier.systemBarsPadding() else Modifier)) {   // 상태바가 보일 땐 그만큼 비움
             // 채팅을 열면 영상은 남은 공간에 맞춰 줄어들고, 채팅은 오른쪽에 붙음
             Row(Modifier.fillMaxSize()) {
-                Box(Modifier.weight(1f).fillMaxHeight()) {
-                    PlayerSurface(Modifier.fillMaxSize())
-                    PlayerControls(cur, st, controls, fullscreen = true, onMore = { showSheet = true },
+                // 가로 화면에서도 영상을 아래로 끌면: 전체화면이면 해제, 아니면(태블릿) 미니 플레이어로
+                val lDragY = remember { androidx.compose.animation.core.Animatable(0f) }
+                val lScope = rememberCoroutineScope()
+                var lHeight by remember { mutableFloatStateOf(1f) }
+                val lDrag = androidx.compose.foundation.gestures.rememberDraggableState { d ->
+                    lScope.launch { lDragY.snapTo((lDragY.value + d).coerceAtLeast(0f)) }
+                }
+                Box(Modifier.weight(1f).fillMaxHeight()
+                    .pinchZoom(zoom)
+                    .onSizeChanged { lHeight = it.height.toFloat().coerceAtLeast(1f) }
+                    .graphicsLayer {
+                        val p = (lDragY.value / lHeight).coerceIn(0f, 1f)
+                        translationY = lDragY.value
+                        scaleX = 1f - p * 0.12f; scaleY = scaleX
+                    }
+                    .draggable(lDrag, androidx.compose.foundation.gestures.Orientation.Vertical,
+                        onDragStopped = { v ->
+                            if (lDragY.value > lHeight * 0.2f || v > 1800f) {
+                                if (activity?.isFullscreen == true) {
+                                    activity.setFullscreen(false)
+                                    lDragY.animateTo(0f, androidx.compose.animation.core.spring())
+                                } else {
+                                    lDragY.animateTo(lHeight, androidx.compose.animation.core.tween(160))
+                                    Nav.pop()
+                                }
+                            } else lDragY.animateTo(0f, androidx.compose.animation.core.spring())
+                        })) {
+                    PlayerSurface(Modifier.fillMaxSize(), zoom)
+                    ZoomBadge(zoom)
+                    PlayerControls(cur, st, controls, fullscreen = isFull, onMore = { showSheet = true },
                         chatOpen = if (cur is NowPlaying.Live) chatOpen else null,
                         onToggleChat = { Prefs.setLandscapeChat(!chatOpen) })
                 }
@@ -266,6 +317,7 @@ fun PlayerScreen() {
             }
             .blockTouches().background(C.Bg).statusBarsPadding().navigationBarsPadding().imePadding()) {
             Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f)
+                .pinchZoom(zoom)
                 .draggable(dragState, androidx.compose.foundation.gestures.Orientation.Vertical,
                     onDragStopped = { velocity ->
                         if (dragY.value > screenH * 0.22f || velocity > 1800f) {
@@ -275,7 +327,8 @@ fun PlayerScreen() {
                             dragY.animateTo(0f, androidx.compose.animation.core.spring())
                         }
                     })) {
-                PlayerSurface(Modifier.fillMaxSize())
+                PlayerSurface(Modifier.fillMaxSize(), zoom)
+                ZoomBadge(zoom)
                 PlayerControls(cur, st, controls, fullscreen = false, onMore = { showSheet = true })
             }
             when (cur) {
@@ -323,7 +376,7 @@ private fun PlayerControls(cur: NowPlaying, st: PlayerUiState, ui: ControlsUi, f
             Box(Modifier.fillMaxSize().background(Color(0x66000000))) {
                 Row(Modifier.fillMaxWidth().padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
                     IconBtn(Icons.Filled.KeyboardArrowDown, "접기") {
-                        if (fullscreen) activity?.setFullscreen(false) else Nav.pop()
+                        if (activity?.isFullscreen == true) activity.setFullscreen(false) else Nav.pop()
                     }
                     if (isLive) {
                         Text("LIVE", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold,
@@ -339,7 +392,7 @@ private fun PlayerControls(cur: NowPlaying, st: PlayerUiState, ui: ControlsUi, f
                     IconBtn(Icons.Filled.Headphones, "라디오 모드", tint = if (radio) C.Accent else Color.White) {
                         PlayerHolder.setRadio(!radio)
                     }
-                    if (fullscreen && chatOpen != null) {
+                    if (chatOpen != null) {   // 가로 화면이면 전체화면이 아니어도(태블릿) 채팅 토글
                         IconBtn(if (chatOpen) Icons.Filled.SpeakerNotesOff else Icons.AutoMirrored.Filled.Chat,
                             if (chatOpen) "채팅 닫기" else "채팅 열기", tint = if (chatOpen) C.Accent else Color.White) {
                             onToggleChat(); touch++
@@ -686,6 +739,7 @@ private fun PlayerSettings(isLive: Boolean, onClose: () -> Unit) {
     val latency by Prefs.latency.collectAsState()
     val autoPip by Prefs.autoPip.collectAsState()
     val cleanBot by Prefs.cleanBot.collectAsState()
+    val mixAudio by Prefs.mixAudio.collectAsState()
     var page by remember { mutableIntStateOf(0) }   // 0 메인, 1 해상도, 2 지연 모드
 
     Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(bottom = 12.dp)) {
@@ -704,6 +758,7 @@ private fun PlayerSettings(isLive: Boolean, onClose: () -> Unit) {
                 if (isLive) SheetRow("지연 모드", latency.label) { page = 2 }
                 ToggleRow("라디오 모드 (음성만 듣기)", radio) { PlayerHolder.setRadio(it) }
                 ToggleRow("홈으로 나가면 자동 PIP", autoPip, Prefs::setAutoPip)
+                ToggleRow("다른 앱과 동시 재생", mixAudio) { PlayerHolder.setMixAudio(it) }
                 if (isLive) ToggleRow("클린봇", cleanBot, Prefs::setCleanBot)
                 if (isLive) SheetRow("실시간으로 이동", null) { PlayerHolder.jumpToLive(); onClose() }
                 SheetRow("닫기", null, onClose)
@@ -726,7 +781,40 @@ private fun SheetRow(label: String, value: String?, onClick: () -> Unit) {
 fun MiniPlayer(modifier: Modifier = Modifier) {
     val st = rememberPlayerUiState()
     val radio by PlayerHolder.radio.collectAsState()
-    Box(modifier.width(210.dp).aspectRatio(16f / 9f).clip(RoundedCornerShape(12.dp)).background(Color.Black)
+    val off = remember { androidx.compose.animation.core.Animatable(Offset.Zero, Offset.VectorConverter) }
+    val scope = rememberCoroutineScope()
+    var w by remember { mutableFloatStateOf(1f) }
+    var h by remember { mutableFloatStateOf(1f) }
+    Box(modifier.width(210.dp).aspectRatio(16f / 9f)
+        .onSizeChanged { w = it.width.toFloat(); h = it.height.toFloat() }
+        .graphicsLayer {
+            translationX = off.value.x; translationY = off.value.y
+            // 닫히는 방향으로 멀어질수록 흐려짐
+            alpha = 1f - (maxOf(kotlin.math.abs(off.value.x) / w, off.value.y.coerceAtLeast(0f) / h) * 0.8f).coerceIn(0f, 0.8f)
+        }
+        .pointerInput(Unit) {
+            detectDragGestures(
+                onDrag = { change, d -> change.consume(); scope.launch { off.snapTo(off.value + d) } },
+                onDragEnd = {
+                    val o = off.value
+                    scope.launch {
+                        when {
+                            o.y < -h * 0.5f -> { off.snapTo(Offset.Zero); Nav.push(Route.Player) }     // 위로: 크게
+                            kotlin.math.abs(o.x) > w * 0.4f || o.y > h * 0.6f -> {                       // 옆·아래로: 닫기
+                                val target = if (kotlin.math.abs(o.x) > w * 0.4f) Offset(if (o.x > 0) w * 1.5f else -w * 1.5f, o.y)
+                                             else Offset(o.x, h * 2f)
+                                off.animateTo(target, androidx.compose.animation.core.tween(140))
+                                Session.close()
+                                off.snapTo(Offset.Zero)
+                            }
+                            else -> off.animateTo(Offset.Zero, androidx.compose.animation.core.spring())
+                        }
+                    }
+                },
+                onDragCancel = { scope.launch { off.animateTo(Offset.Zero) } },
+            )
+        }
+        .clip(RoundedCornerShape(12.dp)).background(Color.Black)
         .clickable { Nav.push(Route.Player) }) {
         PlayerSurface(Modifier.fillMaxSize())
         Box(Modifier.fillMaxSize().background(Color(0x33000000)))

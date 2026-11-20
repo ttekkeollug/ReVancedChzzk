@@ -19,6 +19,7 @@ import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import com.seolha.rechzzk.net.VodSource
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector
 import com.seolha.rechzzk.LatencyMode
+import com.seolha.rechzzk.Prefs
 import com.seolha.rechzzk.net.Http
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -52,6 +53,14 @@ object PlayerHolder {
             .setDefaultRequestProperties(mapOf("Referer" to "https://chzzk.naver.com/", "Origin" to "https://chzzk.naver.com"))
     }
 
+    private val audioAttrs = AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build()
+
+    /** 다른 앱과 동시 재생 설정 변경 (재생 중에도 바로 적용) */
+    fun setMixAudio(on: Boolean) {
+        Prefs.setMixAudio(on)
+        player.setAudioAttributes(audioAttrs, !on)
+    }
+
     fun init(ctx: Context) {
         if (::player.isInitialized) return
         trackSelector = DefaultTrackSelector(ctx)
@@ -72,10 +81,8 @@ object PlayerHolder {
             .setTrackSelector(trackSelector)
             .setLoadControl(loadControl)
             .setLivePlaybackSpeedControl(speedControl)
-            .setAudioAttributes(
-                AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(),
-                true,
-            )
+            // 동시 재생이 켜져 있으면 오디오 포커스를 요청하지 않음 → 다른 앱 소리가 나도 멈추지 않고, 다른 앱도 멈추게 하지 않음
+            .setAudioAttributes(audioAttrs, !Prefs.mixAudio.value)
             .setHandleAudioBecomingNoisy(true)
             .setSeekBackIncrementMs(10_000)
             .setSeekForwardIncrementMs(10_000)

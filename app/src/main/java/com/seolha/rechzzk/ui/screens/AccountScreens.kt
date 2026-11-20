@@ -127,6 +127,7 @@ private fun AccountScreen(onLogin: () -> Unit) {
     val autoPip by Prefs.autoPip.collectAsState()
     val bg by Prefs.backgroundPlay.collectAsState()
     val cleanBot by Prefs.cleanBot.collectAsState()
+    val mixAudio by Prefs.mixAudio.collectAsState()
     val liveAlerts by Prefs.liveAlerts.collectAsState()
     val alertAll by Prefs.alertAll.collectAsState()
     val autoClaim by Prefs.autoClaim.collectAsState()
@@ -160,6 +161,12 @@ private fun AccountScreen(onLogin: () -> Unit) {
         item { ToggleRow("홈으로 나가면 자동 PIP", autoPip, Prefs::setAutoPip) }
         item { ToggleRow("라디오 모드일 때 백그라운드 재생", bg, Prefs::setBackgroundPlay) }
         item { ToggleRow("클린봇 (가려진 채팅 숨김)", cleanBot, Prefs::setCleanBot) }
+        item { ToggleRow("다른 앱과 동시 재생", mixAudio) { com.seolha.rechzzk.player.PlayerHolder.setMixAudio(it) } }
+        item {
+            Text(if (mixAudio) "게임·음악 등 다른 앱 소리가 나도 방송이 멈추지 않고 같이 들립니다."
+                 else "다른 앱이 소리를 내면 방송이 일시정지됩니다(안드로이드 기본 동작).",
+                color = C.Dim, fontSize = 12.sp, modifier = Modifier.padding(horizontal = 16.dp, vertical = 2.dp))
+        }
         item { SettingHeader("알림 · 통나무") }
         item { ToggleRow("방송 시작 알림", liveAlerts) { Prefs.setLiveAlerts(it); LiveAlerts.setup(ctx) } }
         if (liveAlerts) {

@@ -67,11 +67,12 @@ fun ExploreScreen() {
     var tab by rememberSaveable { mutableIntStateOf(0) }
     Column(Modifier.fillMaxSize()) {
         AppTopBar()
-        TopTabs(listOf("라이브", "동영상", "카테고리"), tab) { tab = it }
-        when (tab) {
-            0 -> ExploreLives()
-            1 -> ExploreVideos()
-            else -> ExploreCategories()
+        SwipeTabs(listOf("라이브", "동영상", "카테고리"), tab, { tab = it }, Modifier.fillMaxSize()) { page ->
+            when (page) {
+                0 -> ExploreLives()
+                1 -> ExploreVideos()
+                else -> ExploreCategories()
+            }
         }
     }
 }

@@ -63,12 +63,24 @@ object Prefs {
     /** 최근 사용한 이모티콘 (최신순, 최대 30개) */
     val recentEmojis: StateFlow<List<com.seolha.rechzzk.net.Emoji>> = _recentEmojis.asStateFlow()
 
+    /**
+     * 최근 사용 이모티콘에 추가. 이미 있는 이모티콘은 자리를 옮기지 않아서 손에 익은 위치가 그대로 유지되고,
+     * 처음 쓰는 이모티콘만 맨 앞에 추가됨(30개가 넘으면 가장 오래된 것부터 빠짐).
+     */
     fun addRecentEmoji(e: com.seolha.rechzzk.net.Emoji) {
-        val list = (listOf(e) + _recentEmojis.value.filter { it.emojiId != e.emojiId }).take(30)
+        val cur = _recentEmojis.value
+        if (cur.any { it.emojiId == e.emojiId }) return
+        val list = (listOf(e) + cur).take(30)
         _recentEmojis.value = list
         sp.edit().putString("recentEmojis", com.seolha.rechzzk.net.Http.json.encodeToString(
             kotlinx.serialization.builtins.ListSerializer(com.seolha.rechzzk.net.Emoji.serializer()), list)).apply()
     }
+
+    private val _mixAudio = MutableStateFlow(true)
+    /** 다른 앱(게임·음악 등) 소리와 동시에 재생 */
+    val mixAudio: StateFlow<Boolean> = _mixAudio.asStateFlow()
+
+    fun setMixAudio(v: Boolean) { _mixAudio.value = v; sp.edit().putBoolean("mixAudio", v).apply() }
 
     lateinit var raw: SharedPreferences
         private set
@@ -88,6 +100,7 @@ object Prefs {
             com.seolha.rechzzk.net.Http.json.decodeFromString(
                 kotlinx.serialization.builtins.ListSerializer(com.seolha.rechzzk.net.Emoji.serializer()), sp.getString("recentEmojis", "[]")!!)
         }.getOrDefault(emptyList())
+        _mixAudio.value = sp.getBoolean("mixAudio", true)
         raw = sp
     }
 
